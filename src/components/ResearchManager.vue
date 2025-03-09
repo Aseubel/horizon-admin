@@ -1,0 +1,440 @@
+<template>
+    <div class="page-container">
+        <div class="page-header">
+            <h1 class="page-title">当前标题页名称：研究管理</h1>
+            <div class="header-actions">
+                <el-select v-model="currentType" placeholder="选择研究类型" @change="fetchResearches">
+                    <el-option v-for="type in researchTypes" :key="type.typeId" :label="type.typeName" :value="type" />
+                </el-select>
+                <el-button type="primary" @click="openAddDialog">添加研究</el-button>
+            </div>
+        </div>
+
+        <!-- 选择框不显示内容，故添加调试信息 -->
+        <div class="debug-info">
+            <p>当前类型名称: {{ currentType?.typeName || '未选择' }}</p>
+            <p>当前类型ID: {{ currentType?.typeId || '未选择' }}</p>
+            <p>成员数量: {{ researches.length }}</p>
+            <p>加载状态: {{ loading ? '加载中' : '已加载' }}</p>
+        </div>
+
+        <div class="page-content" v-loading="loading">
+            <!-- 研究列表 -->
+            <el-empty v-if="!loading && (!researches || researches.length === 0)" description="暂无数据"></el-empty>
+            <el-table v-else :data="researches" style="width: 100%">
+                <el-table-column prop="image" label="图片" width="120">
+                    <template #default="scope">
+                        <el-image style="width: 100px; height: 60px"
+                            :src="scope.row.image || 'https://cube.elemecdn.com/e/fd/0fc7d20532fdaf769a25683617711png.png'"
+                            fit="cover" :preview-src-list="scope.row.image ? [scope.row.image] : []">
+                        </el-image>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="title" label="标题" />
+                <el-table-column prop="link" label="链接" width="200">
+                    <template #default="scope">
+                        <el-link v-if="scope.row.link" :href="scope.row.link" target="_blank"
+                            type="primary">查看链接</el-link>
+                        <span v-else>暂无链接</span>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="200">
+                    <template #default="scope">
+                        <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>
+                        <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+        </div>
+
+        <!-- 添加/编辑研究对话框 -->
+        <el-dialog :title="dialogTitle" v-model="dialogVisible" width="50%" :before-close="handleDialogClose">
+            <el-form :model="researchForm" label-width="100px">
+                <el-form-item label="标题">
+                    <el-input v-model="researchForm.title" placeholder="请输入研究标题" />
+                </el-form-item>
+                <el-form-item label="类型">
+                    <el-select v-model="researchForm.typeId" placeholder="选择研究类型">
+                        <el-option v-for="type in researchTypes" :key="type.typeId" :label="type.typeName"
+                            :value="type.typeId" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="链接">
+                    <el-input v-model="researchForm.link" placeholder="请输入研究链接" />
+                </el-form-item>
+                <el-form-item label="图片">
+                    <el-upload class="image-uploader" action="/api/file/upload" :show-file-list="false"
+                        :on-success="handleImageSuccess" :before-upload="beforeImageUpload">
+                        <img v-if="researchForm.image" :src="researchForm.image" class="research-image" />
+                        <el-icon v-else class="image-uploader-icon">
+                            <Plus />
+                        </el-icon>
+                    </el-upload>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <span class="dialog-footer">
+                    <el-button @click="cancelEdit">取消</el-button>
+                    <el-button type="primary" @click="saveResearch">确定</el-button>
+                </span>
+            </template>
+        </el-dialog>
+
+        <!-- 删除确认对话框 -->
+        <el-dialog title="确认删除" v-model="deleteDialogVisible" width="30%">
+            <span>确定要删除研究 "{{ researchToDelete?.title }}" 吗？</span>
+            <template #footer>
+                <span class="dialog-footer">
+                    <el-button @click="deleteDialogVisible = false">取消</el-button>
+                    <el-button type="danger" @click="confirmDelete">确定</el-button>
+                </span>
+            </template>
+        </el-dialog>
+    </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
+import axios from '../api/request'
+
+// 接口类型定义
+interface ResearchType {
+    typeId: string;
+    pageId: string;
+    typeName: string;
+}
+
+interface Research {
+    researchId: string;
+    typeId: string;
+    title: string;
+    link: string;
+    image: string;
+}
+
+// 状态变量
+const loading = ref(false)
+const researches = ref<Research[]>([])
+const researchTypes = ref<ResearchType[]>([])
+const currentType = ref<ResearchType>()
+const dialogVisible = ref(false)
+const dialogTitle = ref('添加研究')
+const deleteDialogVisible = ref(false)
+const researchToDelete = ref<Research | null>(null)
+const isEdit = ref(false)
+const originalImage = ref('')
+
+// 表单数据
+const researchForm = reactive<Research>({
+    researchId: '',
+    typeId: '',
+    title: '',
+    link: '',
+    image: ''
+})
+
+// 获取研究类型列表
+const fetchResearchTypes = async () => {
+    loading.value = true
+    try {
+        const response = await axios.get('/api/research/type?pageId=3')
+
+        if (response.data.code === 0 || response.data.code === 200) {
+            researchTypes.value = response.data.data || []
+
+            if (researchTypes.value.length > 0) {
+                currentType.value = researchTypes.value[0]
+                fetchResearches()
+            } else {
+                loading.value = false
+            }
+        } else {
+            console.error('获取研究类型失败:', response.data)
+            ElMessage.error('获取研究类型失败')
+            loading.value = false
+        }
+    } catch (error) {
+        console.error('Error fetching research types:', error)
+        ElMessage.error('获取研究类型失败')
+        loading.value = false
+    }
+}
+
+// 获取研究列表
+const fetchResearches = async () => {
+    if (!currentType?.value?.typeId) {
+        console.log('当前类型ID为空，不获取研究列表')
+        return
+    }
+
+    loading.value = true
+    try {
+        const response = await axios.get(`/api/research?typeId=${currentType?.value.typeId}`)
+
+        if (response.data.code === 0 || response.data.code === 200) {
+            researches.value = response.data.data || []
+        } else {
+            console.error('获取研究列表失败:', response.data)
+            ElMessage.error('获取研究列表失败')
+        }
+    } catch (error) {
+        console.error('Error fetching researches:', error)
+        ElMessage.error('获取研究列表失败')
+    } finally {
+        loading.value = false
+    }
+}
+
+// 获取研究详情
+const fetchResearchDetail = async (researchId: string) => {
+    loading.value = true
+    try {
+        const response = await axios.get(`/api/research/detail?researchId=${researchId}`)
+        if (response.data.code === 200) {
+            Object.assign(researchForm, response.data.data)
+        } else {
+            ElMessage.error('获取研究详情失败')
+        }
+    } catch (error) {
+        console.error('Error fetching research detail:', error)
+        ElMessage.error('获取研究详情失败')
+    } finally {
+        loading.value = false
+    }
+}
+
+// 打开添加对话框
+const openAddDialog = () => {
+    isEdit.value = false
+    dialogTitle.value = '添加研究'
+    resetForm()
+    originalImage.value = '' // 清空原始图片
+    dialogVisible.value = true
+}
+
+// 处理编辑
+const handleEdit = async (row: Research) => {
+    isEdit.value = true
+    dialogTitle.value = '编辑研究'
+    await fetchResearchDetail(row.researchId)
+    originalImage.value = researchForm.image // 保存原始图片路径
+    dialogVisible.value = true
+}
+
+// 处理删除
+const handleDelete = (row: Research) => {
+    researchToDelete.value = row
+    deleteDialogVisible.value = true
+}
+
+// 确认删除
+const confirmDelete = async () => {
+    if (!researchToDelete.value) return
+
+    loading.value = true
+    try {
+        const response = await axios.delete(`/api/research/?researchId=${researchToDelete.value.researchId}`)
+        if (response.data.code === 200) {
+            ElMessage.success('删除成功')
+            fetchResearches()
+        } else {
+            ElMessage.error('删除失败')
+        }
+    } catch (error) {
+        console.error('Error deleting research:', error)
+        ElMessage.error('删除失败')
+    } finally {
+        loading.value = false
+        deleteDialogVisible.value = false
+    }
+}
+
+// 保存研究
+const saveResearch = async () => {
+    loading.value = true
+    try {
+        let response
+        if (isEdit.value) {
+            response = await axios.put('/api/research/update', researchForm)
+            // 如果编辑时更换了图片且保存成功，删除旧图片
+            if (response.data.code === 200 && originalImage.value && originalImage.value !== researchForm.image) {
+                deleteUploadedImage(originalImage.value)
+            }
+        } else {
+            response = await axios.post('/api/research/', researchForm)
+        }
+
+        if (response.data.code === 200) {
+            ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
+            dialogVisible.value = false
+            fetchResearches()
+        } else {
+            ElMessage.error(isEdit.value ? '更新失败' : '添加失败')
+            // 如果保存失败，删除新上传的图片
+            if (!isEdit.value && researchForm.image) {
+                deleteUploadedImage(researchForm.image)
+            } else if (isEdit.value && researchForm.image !== originalImage.value) {
+                deleteUploadedImage(researchForm.image)
+            }
+        }
+    } catch (error) {
+        console.error('Error saving research:', error)
+        ElMessage.error(isEdit.value ? '更新失败' : '添加失败')
+    } finally {
+        loading.value = false
+    }
+}
+
+// 重置表单
+const resetForm = () => {
+    Object.assign(researchForm, {
+        researchId: '',
+        typeId: currentType?.value?.typeId,
+        title: '',
+        link: '',
+        image: ''
+    })
+}
+
+// 图片上传成功回调
+const handleImageSuccess = (response: any) => {
+    console.log('图片上传成功:', response)
+    researchForm.image = response.data
+}
+
+// 图片上传前验证
+const beforeImageUpload = (file: File) => {
+    const isImage = file.type.startsWith('image/')
+    const isLt2M = file.size / 1024 / 1024 < 2
+
+    if (!isImage) {
+        ElMessage.error('上传文件只能是图片格式!')
+    }
+    if (!isLt2M) {
+        ElMessage.error('上传图片大小不能超过 2MB!')
+    }
+    return isImage && isLt2M
+}
+
+// 取消编辑，如果上传了新图片但未保存，则删除该图片
+const cancelEdit = () => {
+    if (!isEdit.value && researchForm.image) {
+        // 如果是新增且上传了图片，删除图片
+        deleteUploadedImage(researchForm.image)
+    } else if (isEdit.value && researchForm.image !== originalImage.value) {
+        // 如果是编辑且更换了图片，删除新上传的图片
+        deleteUploadedImage(researchForm.image)
+    }
+    dialogVisible.value = false
+}
+
+// 对话框关闭前的钩子
+const handleDialogClose = (done: () => void) => {
+    cancelEdit()
+    done()
+}
+
+// 删除已上传但未保存的图片
+const deleteUploadedImage = async (imagePath: string) => {
+    if (!imagePath) return
+
+    try {
+        console.log('删除未保存的图片:', imagePath)
+        await axios.delete(`/api/file/delete?filePath=${encodeURIComponent(imagePath)}`)
+        console.log('图片删除成功')
+    } catch (error) {
+        console.error('删除图片失败:', error)
+    }
+}
+
+// 页面加载时获取数据
+onMounted(() => {
+    fetchResearchTypes()
+})
+</script>
+
+<style scoped>
+.page-container {
+    background-color: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    padding: 20px;
+}
+
+.page-header {
+    border-bottom: 1px solid #dcdfe6;
+    padding-bottom: 20px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.page-title {
+    font-size: 18px;
+    color: #303133;
+    margin: 0;
+}
+
+.header-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.image-uploader {
+    width: 300px;
+    height: 180px;
+    border: 1px dashed #d9d9d9;
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.image-uploader:hover {
+    border-color: #409EFF;
+}
+
+.image-uploader-icon {
+    font-size: 28px;
+    color: #8c939d;
+    width: 300px;
+    height: 180px;
+    line-height: 180px;
+    text-align: center;
+}
+
+.research-image {
+    width: 300px;
+    height: 180px;
+    display: block;
+    object-fit: cover;
+}
+
+/* 调试信息样式 */
+.debug-info {
+    margin: 10px 0;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+}
+
+.debug-info p {
+    margin: 5px 0;
+    font-family: monospace;
+}
+
+/* 确保表格可见 */
+.el-table {
+    margin-top: 20px;
+    width: 100% !important;
+}
+
+/* 确保内容区域有足够的高度 */
+.page-content {
+    min-height: 300px;
+}
+</style>
