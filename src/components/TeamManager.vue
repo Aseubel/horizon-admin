@@ -199,6 +199,9 @@ const fetchMembers = async () => {
 
     if (response.data.code === 0 || response.data.code === 200) {
       members.value = response.data.data || []
+      members.value.forEach((member) => {
+        member.image = "http://127.0.0.1:611/api/file/picture?filePath=" + member.image
+      })
     } else {
       console.error('获取成员列表失败:', response.data)
       ElMessage.error('获取成员列表失败')
@@ -218,6 +221,7 @@ const fetchMemberDetail = async (memberId: string) => {
     const response = await axios.get(`/api/member/detail?memberId=${memberId}`)
     if (response.data.code === 200) {
       Object.assign(memberForm, response.data.data)
+      memberForm.image = "http://127.0.0.1:611/api/file/picture?filePath=" + memberForm.image
     } else {
       ElMessage.error('获取成员详情失败')
     }
@@ -280,6 +284,7 @@ const saveMember = async () => {
   loading.value = true
   try {
     let response
+    memberForm.image = substringFrom(memberForm.image, "autogo")
     if (isEdit.value) {
       response = await axios.put('/api/member/update', memberForm)
       // 如果编辑时更换了图片且保存成功，删除旧图片
@@ -332,7 +337,7 @@ const resetForm = () => {
 // 头像上传成功回调
 const handleAvatarSuccess = (response: any) => {
   console.log('头像上传成功:', response)
-  memberForm.image = response.data
+  memberForm.image = "http://127.0.0.1:611/api/file/picture?filePath=" + response.data
 }
 
 // 头像上传前验证
@@ -367,13 +372,19 @@ const handleDialogClose = (done: () => void) => {
   done()
 }
 
+function substringFrom(str: string, subStr: string) {
+  const index = str.indexOf(subStr);
+  if (index === -1) return ''; // 如果子串不存在，返回空字符串
+  return str.substring(index); // 从子串位置开始截取到末尾
+}
+
 // 删除已上传但未保存的图片
 const deleteUploadedImage = async (imagePath: string) => {
   if (!imagePath) return
 
   try {
     console.log('删除未保存的图片:', imagePath)
-    await axios.delete(`/api/file/delete?filePath=${encodeURIComponent(imagePath)}`)
+    await axios.delete(`/api/file/delete?filePath=${substringFrom(imagePath, "autogo")}`)
     console.log('图片删除成功')
   } catch (error) {
     console.error('删除图片失败:', error)

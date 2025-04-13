@@ -181,6 +181,9 @@ const fetchDevices = async () => {
 
         if (response.data.code === 0 || response.data.code === 200) {
             devices.value = response.data.data || []
+            devices.value.forEach((device) => {
+                device.image = "http://127.0.0.1:611/api/file/picture?filePath=" + device.image
+            })
         } else {
             console.error('获取设备列表失败:', response.data)
             ElMessage.error('获取设备列表失败')
@@ -200,6 +203,7 @@ const fetchDeviceDetail = async (deviceId: string) => {
         const response = await axios.get(`/api/device/detail?deviceId=${deviceId}`)
         if (response.data.code === 200) {
             Object.assign(deviceForm, response.data.data)
+            deviceForm.image = "http://127.0.0.1:611/api/file/picture?filePath=" + deviceForm.image
         } else {
             ElMessage.error('获取设备详情失败')
         }
@@ -262,6 +266,7 @@ const saveDevice = async () => {
     loading.value = true
     try {
         let response
+        deviceForm.image = substringFrom(deviceForm.image, "autogo")
         if (isEdit.value) {
             response = await axios.put('/api/device/update', deviceForm)
             // 如果编辑时更换了图片且保存成功，删除旧图片
@@ -308,7 +313,7 @@ const resetForm = () => {
 // 图片上传成功回调
 const handleImageSuccess = (response: any) => {
     console.log('图片上传成功:', response)
-    deviceForm.image = response.data
+    deviceForm.image = "http://127.0.0.1:611/api/file/picture?filePath=" + response.data
 }
 
 // 图片上传前验证
@@ -343,13 +348,19 @@ const handleDialogClose = (done: () => void) => {
     done()
 }
 
+function substringFrom(str: string, subStr: string) {
+    const index = str.indexOf(subStr);
+    if (index === -1) return ''; // 如果子串不存在，返回空字符串
+    return str.substring(index); // 从子串位置开始截取到末尾
+}
+
 // 删除已上传但未保存的图片
 const deleteUploadedImage = async (imagePath: string) => {
     if (!imagePath) return
 
     try {
         console.log('删除未保存的图片:', imagePath)
-        await axios.delete(`/api/file/delete?filePath=${encodeURIComponent(imagePath)}`)
+        await axios.delete(`/api/file/delete?filePath=${substringFrom(imagePath, "autogo")}`)
         console.log('图片删除成功')
     } catch (error) {
         console.error('删除图片失败:', error)
